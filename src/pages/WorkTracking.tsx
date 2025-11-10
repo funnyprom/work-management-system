@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Task } from '../types';
 import { Plus, Edit2, Trash2, X } from 'lucide-react';
+import { tasksApi } from '../services/api';
 
 const WorkTracking = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -16,35 +19,67 @@ const WorkTracking = () => {
   });
 
   useEffect(() => {
-    const storedTasks = localStorage.getItem('tasks');
-    if (storedTasks) {
-      setTasks(JSON.parse(storedTasks));
-    }
+    loadTasks();
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem('tasks', JSON.stringify(tasks));
-  }, [tasks]);
+  const loadTasks = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await tasksApi.getAll();
+      setTasks(data);
+    } catch (err) {
+      console.error('Failed to load tasks:', err);
+      setError('ไม่สามารถโหลดข้อมูลงานได้ กำลังใช้ข้อมูลจาก Local Storage');
+      // Fallback to localStorage
+      const storedTasks = localStorage.getItem('tasks');
+      if (storedTasks) {
+        setTasks(JSON.parse(storedTasks));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (editingTask) {
-      setTasks(tasks.map(task => 
-        task.id === editingTask.id 
-          ? { ...task, ...formData }
-          : task
-      ));
-    } else {
-      const newTask: Task = {
-        id: Date.now().toString(),
-        ...formData,
-        createdAt: new Date().toISOString(),
-      };
-      setTasks([...tasks, newTask]);
-    }
+    try {
+      setLoading(true);
+      setError(null);
 
-    resetForm();
+      if (editingTask) {
+        await tasksApi.update(editingTask.id, formData);
+      } else {
+        await tasksApi.create(formData);
+      }
+
+      await loadTasks();
+      resetForm();
+    } catch (err) {
+      console.error('Failed to save task:', err);
+      setError('ไม่สามารถบันทึกงานได้ กรุณาลองใหม่อีกครั้ง');
+      
+      // Fallback to localStorage
+      if (editingTask) {
+        setTasks(tasks.map(task => 
+          task.id === editingTask.id 
+            ? { ...task, ...formData }
+            : task
+        ));
+      } else {
+        const newTask: Task = {
+          id: Date.now().toString(),
+          ...formData,
+          createdAt: new Date().toISOString(),
+        };
+        setTasks([...tasks, newTask]);
+      }
+      localStorage.setItem('tasks', JSON.stringify(tasks));
+      resetForm();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleEdit = (task: Task) => {
@@ -60,9 +95,24 @@ const WorkTracking = () => {
     setShowModal(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('คุณต้องการลบงานนี้หรือไม่?')) {
-      setTasks(tasks.filter(task => task.id !== id));
+      try {
+        setLoading(true);
+        setError(null);
+        await tasksApi.delete(id);
+        await loadTasks();
+      } catch (err) {
+        console.error('Failed to delete task:', err);
+        setError('ไม่สามารถลบงานได้ กรุณาลองใหม่อีกครั้ง');
+        
+        // Fallback to localStorage
+        const updatedTasks = tasks.filter(task => task.id !== id);
+        setTasks(updatedTasks);
+        localStorage.setItem('tasks', JSON.stringify(updatedTasks));
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -104,12 +154,27 @@ const WorkTracking = () => {
         </div>
         <button
           onClick={() => setShowModal(true)}
-          className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+          disabled={loading}
+          className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Plus className="w-5 h-5 mr-2" />
           เพิ่มงานใหม่
         </button>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          {error}
+        </div>
+      )}
+
+      {/* Loading Indicator */}
+      {loading && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg">
+          กำลังโหลดข้อมูล...
+        </div>
+      )}
 
       {/* Tasks Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

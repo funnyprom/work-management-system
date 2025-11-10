@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { PurchaseRequest as PR, PRItem } from '../types';
 import { Plus, Trash2, Save, FileText, Eye } from 'lucide-react';
+import { purchaseRequestsApi } from '../services/api';
 
 const PurchaseRequest = () => {
   const [prs, setPrs] = useState<PR[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [viewingPR, setViewingPR] = useState<PR | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     requestor: '',
     department: '',
@@ -22,15 +25,27 @@ const PurchaseRequest = () => {
   }]);
 
   useEffect(() => {
-    const storedPRs = localStorage.getItem('purchaseRequests');
-    if (storedPRs) {
-      setPrs(JSON.parse(storedPRs));
-    }
+    loadPRs();
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem('purchaseRequests', JSON.stringify(prs));
-  }, [prs]);
+  const loadPRs = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await purchaseRequestsApi.getAll();
+      setPrs(data);
+    } catch (err) {
+      console.error('Failed to load purchase requests:', err);
+      setError('ไม่สามารถโหลดข้อมูล PR ได้ กำลังใช้ข้อมูลจาก Local Storage');
+      // Fallback to localStorage
+      const storedPRs = localStorage.getItem('purchaseRequests');
+      if (storedPRs) {
+        setPrs(JSON.parse(storedPRs));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleAddItem = () => {
     const newItem: PRItem = {
@@ -67,19 +82,43 @@ const PurchaseRequest = () => {
     return items.reduce((sum, item) => sum + item.totalPrice, 0);
   };
 
-  const handleSubmit = (status: PR['status']) => {
-    const newPR: PR = {
-      id: Date.now().toString(),
-      requestNumber: `PR-${Date.now().toString().slice(-6)}`,
-      ...formData,
-      items: items,
-      totalAmount: calculateTotal(),
-      status: status,
-      createdAt: new Date().toISOString(),
-    };
+  const handleSubmit = async (status: PR['status']) => {
+    try {
+      setLoading(true);
+      setError(null);
 
-    setPrs([...prs, newPR]);
-    resetForm();
+      const newPR = {
+        requestNumber: `PR-${Date.now().toString().slice(-6)}`,
+        ...formData,
+        items: items,
+        totalAmount: calculateTotal(),
+        status: status,
+      };
+
+      await purchaseRequestsApi.create(newPR);
+      await loadPRs();
+      resetForm();
+    } catch (err) {
+      console.error('Failed to save purchase request:', err);
+      setError('ไม่สามารถบันทึก PR ได้ กรุณาลองใหม่อีกครั้ง');
+      
+      // Fallback to localStorage
+      const fallbackPR: PR = {
+        id: Date.now().toString(),
+        requestNumber: `PR-${Date.now().toString().slice(-6)}`,
+        ...formData,
+        items: items,
+        totalAmount: calculateTotal(),
+        status: status,
+        createdAt: new Date().toISOString(),
+      };
+      const updatedPrs = [...prs, fallbackPR];
+      setPrs(updatedPrs);
+      localStorage.setItem('purchaseRequests', JSON.stringify(updatedPrs));
+      resetForm();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resetForm = () => {
@@ -100,9 +139,24 @@ const PurchaseRequest = () => {
     setShowForm(false);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('คุณต้องการลบ PR นี้หรือไม่?')) {
-      setPrs(prs.filter(pr => pr.id !== id));
+      try {
+        setLoading(true);
+        setError(null);
+        await purchaseRequestsApi.delete(id);
+        await loadPRs();
+      } catch (err) {
+        console.error('Failed to delete purchase request:', err);
+        setError('ไม่สามารถลบ PR ได้ กรุณาลองใหม่อีกครั้ง');
+        
+        // Fallback to localStorage
+        const updatedPrs = prs.filter(pr => pr.id !== id);
+        setPrs(updatedPrs);
+        localStorage.setItem('purchaseRequests', JSON.stringify(updatedPrs));
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -414,12 +468,27 @@ const PurchaseRequest = () => {
         </div>
         <button
           onClick={() => setShowForm(true)}
-          className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+          disabled={loading}
+          className="flex items-center px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Plus className="w-5 h-5 mr-2" />
           สร้าง PR ใหม่
         </button>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          {error}
+        </div>
+      )}
+
+      {/* Loading Indicator */}
+      {loading && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg">
+          กำลังโหลดข้อมูล...
+        </div>
+      )}
 
       <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
         {prs.length === 0 ? (

@@ -2,19 +2,46 @@ import { useEffect, useState } from 'react';
 import { Task, PurchaseRequest } from '../types';
 import { CheckCircle2, Clock, AlertCircle, FileText, TrendingUp } from 'lucide-react';
 import Calendar from '../components/Calendar';
+import { tasksApi, purchaseRequestsApi } from '../services/api';
 
 const Dashboard = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [prs, setPrs] = useState<PurchaseRequest[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const storedTasks = localStorage.getItem('tasks');
-    const storedPrs = localStorage.getItem('purchaseRequests');
-    
-    if (storedTasks) setTasks(JSON.parse(storedTasks));
-    if (storedPrs) setPrs(JSON.parse(storedPrs));
+    loadData();
   }, []);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Load tasks and PRs in parallel
+      const [tasksData, prsData] = await Promise.all([
+        tasksApi.getAll(),
+        purchaseRequestsApi.getAll(),
+      ]);
+      
+      setTasks(tasksData);
+      setPrs(prsData);
+    } catch (err) {
+      console.error('Failed to load data:', err);
+      setError('ไม่สามารถโหลดข้อมูลได้ กำลังใช้ข้อมูลจาก Local Storage');
+      
+      // Fallback to localStorage
+      const storedTasks = localStorage.getItem('tasks');
+      const storedPrs = localStorage.getItem('purchaseRequests');
+      
+      if (storedTasks) setTasks(JSON.parse(storedTasks));
+      if (storedPrs) setPrs(JSON.parse(storedPrs));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const taskStats = {
     todo: tasks.filter(t => t.status === 'todo').length,
@@ -36,6 +63,20 @@ const Dashboard = () => {
         <h1 className="text-3xl font-bold text-gray-900">แดชบอร์ด</h1>
         <p className="mt-2 text-sm text-gray-600">ภาพรวมของระบบติดตามงาน</p>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+          {error}
+        </div>
+      )}
+
+      {/* Loading Indicator */}
+      {loading && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg">
+          กำลังโหลดข้อมูล...
+        </div>
+      )}
 
       {/* Task Statistics */}
       <div>
